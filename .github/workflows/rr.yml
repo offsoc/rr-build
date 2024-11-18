@@ -76,9 +76,8 @@ jobs:
           echo "TAGDATE=${TAGDATE}" >>$GITHUB_ENV
           echo "VERSION=${VERSION}" >>$GITHUB_ENV
 
+          cd rr
           if [ -n "${VERSION}" ]; then
-            cd rr
-
             # Modify Source File
             echo "${VERSION}" >VERSION
             echo "${VERSION}" >files/mnt/p1/RR_VERSION
@@ -93,10 +92,9 @@ jobs:
               git push -f
             fi
           else
-            cd rr
-
             sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${TAGDATE}\"/" files/initrd/opt/rr/include/consts.sh
           fi
+          cd -
 
       # Convert po2mo, Get exts
       - name: Convert po2mo, Get extractor, LKMs, addons and Modules
@@ -133,26 +131,34 @@ jobs:
           fdisk -l "rr_1GB.img"
 
           LOOPX=$(sudo losetup -f)
-          sudo losetup -P "${LOOPX}" "rr_1GB.img"
+          sudo losetup -P "${LOOPX}" "${IMAGE_FILE}"
 
-          echo "Mounting image file"
-          mkdir -p "/tmp/p1"
-          mkdir -p "/tmp/p3"
-          sudo mount ${LOOPX}p1 "/tmp/p1"
-          sudo mount ${LOOPX}p3 "/tmp/p3"
+          for i in {1..3}; do
+            [ ! -d "files/mnt/p${i}" ] && continue
+            
+            rm -rf "/tmp/mnt/p${i}"
+            mkdir -p "/tmp/mnt/p${i}"
 
-          echo "Copying files"
-          sudo cp -Rf "files/mnt/p1/"* "/tmp/p1"
-          sudo cp -Rf "files/mnt/p3/"* "/tmp/p3"
-          sync
+            echo "Mounting ${LOOPX}p${i}"
+            sudo mount "${LOOPX}p${i}" "/tmp/mnt/p${i}" || {
+              echo "Can't mount ${LOOPX}p${i}."
+              break
+            }
+            echo "Copying files to ${LOOPX}p${i}"
+            [ ${i} -eq 1 ] && sudo cp -af "files/mnt/p${i}/"{.locale,.timezone} "/tmp/mnt/p${i}/" 2>/dev/null || true
+            sudo cp -rf "files/mnt/p${i}/"* "/tmp/mnt/p${i}" || true
 
-          echo "Unmount image file"
-          sudo umount "/tmp/p1"
-          sudo umount "/tmp/p3"
-          rmdir "/tmp/p1"
-          rmdir "/tmp/p3"
+            sudo sync
 
-          sudo losetup --detach ${LOOPX}
+            echo "Unmounting ${LOOPX}p${i}"
+            sudo umount "/tmp/mnt/p${i}" || {
+              echo "Can't umount ${LOOPX}p${i}."
+              break
+            }
+            rm -rf "/tmp/mnt/p${i}"
+          done
+
+          sudo losetup --detach "${LOOPX}"
 
           echo "Create RR_4GB image" # $((1024 * 3 - 512))
           resizeImg "rr_1GB.img" "+2560M" "rr.img"
